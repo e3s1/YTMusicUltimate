@@ -1,0 +1,98 @@
+# I modified the github action from @arichornlover 's uYouEnhanced repo, but the original idea is by @ISnackable. Thanks to both of them!
+# https://github.com/ISnackable/YTCubePlus/blob/main/.github/workflows/Build.yml
+
+name: Build and Release YTMusicUltimate deb
+
+on:
+  workflow_dispatch:    
+  
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build YTMusicUltimate
+    runs-on: macos-12
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Main
+        uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: brew install ldid dpkg make
+              
+
+      - name: Set PATH environment variable
+        run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH 
+
+      - name: Setup Theos
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: theos/theos
+          ref: 4bcc52914e0eeca719288522938185decaa8a1cb
+          path: theos
+          submodules: recursive
+      
+      - name: SDK Caching
+        id: SDK
+        uses: actions/cache@v4.0.1
+        env:
+          cache-name: iOS-16.2-SDK
+        with:
+          path: theos/sdks/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Download iOS SDK
+        if: steps.SDK.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/arichornloverALT/sdks/
+          cd sdks
+          git sparse-checkout set --no-cone iPhoneOS16.2.sdk
+          git checkout
+          mv *.sdk $THEOS/sdks
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Setup Theos Jailed
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: qnblackcat/theos-jailed
+          ref: master
+          path: theos-jailed
+          submodules: recursive
+
+      - name: Install Theos Jailed
+        run: |
+          ./theos-jailed/install
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          
+      - name: Install Azule
+        run: |
+          cd ${{ github.workspace }}/main
+          git clone https://github.com/Al4ise/Azule 
+          sudo ln -sf ~/Azule/azule /usr/local/bin/azule
+
+      - name: Build Tweak for Sideloading
+        id: build_package
+        run: |
+          cd ${{ github.workspace }}/main
+          make clean package SIDELOADING=1
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2.0.1
+        with:
+          tag_name: YTMusicUltimate-v${{ github.run_number }}
+          name: YTMusicUltimate-v${{ github.run_number }}
+          files: main/packages/*
+          draft: true
